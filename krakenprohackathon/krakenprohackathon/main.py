@@ -445,29 +445,27 @@ async def analyse_stock(
 
 @app.get("/api/instruments")
 async def get_instruments():
-    """Uses Binance 24hr ticker — no geo-restrictions, real-time data."""
+    """Uses KuCoin 24hr stats — no geo-restrictions."""
     SYMBOLS_TO_TRACK = [
         "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT",
         "ADAUSDT","AVAXUSDT","DOTUSDT","LINKUSDT","UNIUSDT",
         "LTCUSDT","ATOMUSDT","NEARUSDT","APTUSDT","ARBUSDT","OPUSDT",
-        "INJUSDT","SUIUSDT","FETUSDT",
     ]
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                "https://api.binance.com/api/v3/ticker/24hr"
-            )
-        data       = response.json()
-        ticker_map = {item["symbol"]: item for item in data}
-        result     = []
-
+            response = await client.get("https://api.kucoin.com/api/v1/market/allTickers")
+        data    = response.json()
+        tickers = {t["symbol"]: t for t in data["data"]["ticker"]}
+        result  = []
         for symbol in SYMBOLS_TO_TRACK:
-            item = ticker_map.get(symbol)
+            base   = symbol.replace("USDT", "")
+            kc_sym = f"{base}-USDT"
+            item   = tickers.get(kc_sym)
             if not item:
                 continue
-            price      = float(item.get("lastPrice",          0) or 0)
-            change_pct = float(item.get("priceChangePercent", 0) or 0)
-            volume     = float(item.get("quoteVolume",        0) or 0)
+            price      = float(item.get("last",              0) or 0)
+            change_pct = float(item.get("changeRate",        0) or 0) * 100
+            volume     = float(item.get("volValue",          0) or 0)
             result.append({
                 "pair":     symbol.replace("USDT", "/USDT"),
                 "symbol":   symbol,
@@ -476,47 +474,45 @@ async def get_instruments():
                 "vol":      f"{volume/1_000_000:.1f}M" if volume >= 1_000_000 else f"{volume/1000:.1f}K",
                 "momentum": "Strong Buy" if change_pct > 1 else "Buy" if change_pct > 0 else "Sell" if change_pct < -1 else "Neutral",
             })
-
         result.sort(
             key=lambda x: float(x["vol"].replace("M","000").replace("K","").replace(",","")),
             reverse=True,
         )
         return result
-
     except Exception as e:
-        logger.error(f"[Instruments] Binance error: {e}")
+        logger.error(f"[Instruments] KuCoin error: {e}")
         return []
+
 @app.get("/api/candles")
 async def get_candles(
     symbol:   str = Query(...),
     interval: str = Query("1"),
     limit:    int = Query(100),
 ):
-    """Uses Binance kline API — no geo-restrictions."""
-    # Map Bybit intervals to Binance intervals
+    """Uses KuCoin klines — no geo-restrictions."""
     INTERVAL_MAP = {
-        "1": "1m", "3": "3m", "5": "5m", "15": "15m",
-        "30": "30m", "60": "1h", "120": "2h", "240": "4h",
-        "360": "6h", "720": "12h", "D": "1d", "W": "1w", "M": "1M",
+        "1":"1min","3":"3min","5":"5min","15":"15min","30":"30min",
+        "60":"1hour","120":"2hour","240":"4hour","360":"6hour",
+        "720":"8hour","D":"1day","W":"1week",
     }
-    binance_interval = INTERVAL_MAP.get(interval, "1m")
+    kc_interval = INTERVAL_MAP.get(interval, "1min")
+    base      = symbol.upper().replace("USDT", "")
+    kc_symbol = f"{base}-USDT"
     try:
-        url = (
-            f"https://api.binance.com/api/v3/klines"
-            f"?symbol={symbol.upper()}&interval={binance_interval}&limit={limit}"
-        )
+        url = f"https://api.kucoin.com/api/v1/market/candles?type={kc_interval}&symbol={kc_symbol}"
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url)
-        data = response.json()
+        data    = response.json()
+        candles = data["data"][::-1]  # KuCoin returns newest first
         return [
             {
-                "time":  int(c[0]) // 1000,
+                "time":  int(c[0]),
                 "open":  float(c[1]),
-                "high":  float(c[2]),
-                "low":   float(c[3]),
-                "close": float(c[4]),
+                "close": float(c[2]),
+                "high":  float(c[3]),
+                "low":   float(c[4]),
             }
-            for c in data
+            for c in candles
         ]
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))

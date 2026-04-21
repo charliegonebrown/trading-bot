@@ -24,27 +24,20 @@ class BybitBroker:
         )
 
     def get_current_price(self, symbol: str) -> float:
-        """
-        Uses Binance public API for live prices.
-        - No API key needed
-        - No geo-restrictions (works from Railway US IPs)
-        - Real-time updates, 1200 req/min free tier
-        - Same BTCUSDT symbol format — no mapping needed
-        """
+        """Uses KuCoin public API — no geo-restrictions anywhere."""
         try:
-            url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}"
+            # Convert BTCUSDT → BTC-USDT for KuCoin format
+            base = symbol.upper().replace("USDT", "")
+            kucoin_symbol = f"{base}-USDT"
+            url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={kucoin_symbol}"
             response = requests.get(url, timeout=10)
-            if response.status_code != 200:
-                logger.error(f"Binance returned {response.status_code} for {symbol}")
-                return 0.0
-            data  = response.json()
-            price = float(data["price"])
-            logger.info(f"✅ Binance {symbol} = ${price:,.2f}")
+            data = response.json()
+            price = float(data["data"]["price"])
+            logger.info(f"✅ KuCoin {symbol} = ${price:,.2f}")
             return price
         except Exception as e:
-            logger.error(f"Binance price fetch failed for {symbol}: {e}")
+            logger.error(f"KuCoin price fetch failed for {symbol}: {e}")
             return 0.0
-
     def get_price_history(self, symbol: str, interval: str = "1", limit: int = 200):
         """
         Uses Bybit mainnet for candle/OHLCV history.
@@ -113,13 +106,15 @@ class BybitBroker:
             return {"error": str(e)}
 
     async def get_last_price(self, symbol: str) -> float:
-        """Async real-time price via Binance."""
+        """Async price via KuCoin."""
         try:
-            url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}"
+            base = symbol.upper().replace("USDT", "")
+            kucoin_symbol = f"{base}-USDT"
+            url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={kucoin_symbol}"
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url)
-                data     = response.json()
-                return float(data["price"])
+                data = response.json()
+                return float(data["data"]["price"])
         except Exception as e:
-            logger.error(f"Binance async price failed for {symbol}: {e}")
+            logger.error(f"KuCoin async price failed for {symbol}: {e}")
             return 0.0
