@@ -7,41 +7,15 @@ import httpx
 
 logger = logging.getLogger("BybitBroker")
 
-# CoinGecko symbol map — no API key, no geo-restrictions
-COINGECKO_MAP = {
-    "BTCUSDT":    "bitcoin",
-    "ETHUSDT":    "ethereum",
-    "SOLUSDT":    "solana",
-    "BNBUSDT":    "binancecoin",
-    "XRPUSDT":    "ripple",
-    "ADAUSDT":    "cardano",
-    "DOGEUSDT":   "dogecoin",
-    "AVAXUSDT":   "avalanche-2",
-    "DOTUSDT":    "polkadot",
-    "LINKUSDT":   "chainlink",
-    "LTCUSDT":    "litecoin",
-    "UNIUSDT":    "uniswap",
-    "ATOMUSDT":   "cosmos",
-    "NEARUSDT":   "near",
-    "APTUSDT":    "aptos",
-    "ARBUSDT":    "arbitrum",
-    "OPUSDT":     "optimism",
-    "INJUSDT":    "injective-protocol",
-    "SUIUSDT":    "sui",
-    "TONUSDT":    "the-open-network",
-    "FETUSDT":    "fetch-ai",
-    "RENDERUSDT": "render-token",
-    "WLDUSDT":    "worldcoin-wld",
-    "POLUSDT":    "matic-network",
-}
-
 
 class BybitBroker:
     def __init__(self):
+        # Candle history — Bybit mainnet (kline endpoint works from US IPs)
         self.market_session = HTTP(
             testnet=False,
             domain="bybit"
         )
+        # Order execution — Bybit testnet (paper trading)
         self.trade_session = HTTP(
             testnet=True,
             api_key=os.getenv("BYBIT_API_KEY"),
@@ -50,24 +24,32 @@ class BybitBroker:
         )
 
     def get_current_price(self, symbol: str) -> float:
-        """Uses CoinGecko — no geo-restrictions, no API key needed."""
-        coin_id = COINGECKO_MAP.get(symbol.upper(), "")
-        if not coin_id:
-            logger.error(f"Unknown symbol: {symbol}")
-            return 0.0
+        """
+        Uses Binance public API for live prices.
+        - No API key needed
+        - No geo-restrictions (works from Railway US IPs)
+        - Real-time updates, 1200 req/min free tier
+        - Same BTCUSDT symbol format — no mapping needed
+        """
         try:
-            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}"
             response = requests.get(url, timeout=10)
-            data = response.json()
-            price = float(data[coin_id]["usd"])
-            logger.info(f"✅ CoinGecko {symbol} = ${price:,.2f}")
+            if response.status_code != 200:
+                logger.error(f"Binance returned {response.status_code} for {symbol}")
+                return 0.0
+            data  = response.json()
+            price = float(data["price"])
+            logger.info(f"✅ Binance {symbol} = ${price:,.2f}")
             return price
         except Exception as e:
-            logger.error(f"CoinGecko price fetch failed for {symbol}: {e}")
+            logger.error(f"Binance price fetch failed for {symbol}: {e}")
             return 0.0
 
     def get_price_history(self, symbol: str, interval: str = "1", limit: int = 200):
-        """Uses Bybit mainnet for candle history — still works from Railway."""
+        """
+        Uses Bybit mainnet for candle/OHLCV history.
+        Bybit kline endpoint works from US IPs — only ticker endpoint is blocked.
+        """
         try:
             response = self.market_session.get_kline(
                 category="linear",
@@ -81,21 +63,26 @@ class BybitBroker:
             unique_count = len(set(prices[-20:]))
             if unique_count < 5:
                 logger.error(
-                    f"❌ Data quality fail for {symbol}: only {unique_count} unique prices "
-                    f"in last 20 candles."
+                    f"❌ Data quality fail for {symbol}: only {unique_count} unique "
+                    f"prices in last 20 candles."
                 )
                 return []
 
-            logger.info(f"✅ {symbol} price history: {len(prices)} candles, "
-                        f"latest=${prices[-1]:,.2f}")
+            logger.info(
+                f"✅ {symbol} price history: {len(prices)} candles, "
+                f"latest=${prices[-1]:,.2f}"
+            )
             return prices
 
         except Exception as e:
             logger.error(f"Bybit History Fetch Failed: {e}")
             return []
 
-    def place_bracket_order(self, symbol: str, side: str, notional: float, tp_pct: float, sl_pct: float):
-        """Uses trade_session (testnet) for paper order execution."""
+    def place_bracket_order(
+        self, symbol: str, side: str,
+        notional: float, tp_pct: float, sl_pct: float
+    ):
+        """Uses Bybit testnet for safe paper order execution."""
         try:
             price = self.get_current_price(symbol)
             if price == 0:
@@ -126,16 +113,13 @@ class BybitBroker:
             return {"error": str(e)}
 
     async def get_last_price(self, symbol: str) -> float:
-        """Async price via CoinGecko."""
-        coin_id = COINGECKO_MAP.get(symbol.upper(), "")
-        if not coin_id:
-            return 0.0
+        """Async real-time price via Binance."""
         try:
-            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}"
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url)
                 data     = response.json()
-                return float(data[coin_id]["usd"])
+                return float(data["price"])
         except Exception as e:
-            logger.error(f"CoinGecko async price failed for {symbol}: {e}")
+            logger.error(f"Binance async price failed for {symbol}: {e}")
             return 0.0
