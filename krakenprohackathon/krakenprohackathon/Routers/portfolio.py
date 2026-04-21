@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from database import get_db
 from models import Portfolio, Trade, TradeStatus
 
@@ -10,7 +11,6 @@ router = APIRouter()
 def get_portfolio(db: Session = Depends(get_db)):
     portfolio = db.query(Portfolio).first()
     if not portfolio:
-        # Auto-create default portfolio if none exists
         portfolio = Portfolio(
             balance=100000.0,
             initial_balance=100000.0,
@@ -59,8 +59,27 @@ def reset_portfolio(db: Session = Depends(get_db)):
     portfolio.total_trades    = 0
     portfolio.winning_trades  = 0
 
-    # Also wipe all trades
     db.query(Trade).delete()
     db.commit()
-
     return {"message": "Portfolio reset to $100,000", "balance": 100000.0}
+
+
+class PortfolioPatch(BaseModel):
+    balance: float
+
+
+@router.patch("/")
+def patch_portfolio(payload: PortfolioPatch, db: Session = Depends(get_db)):
+    portfolio = db.query(Portfolio).first()
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    portfolio.balance = round(payload.balance, 2)
+    db.commit()
+    db.refresh(portfolio)
+    return {
+        "balance":          round(portfolio.balance, 2),
+        "initial_balance":  round(portfolio.initial_balance, 2),
+        "total_pnl":        round(portfolio.total_pnl or 0.0, 2),
+        "total_trades":     portfolio.total_trades or 0,
+        "winning_trades":   portfolio.winning_trades or 0,
+    }
