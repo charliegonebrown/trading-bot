@@ -1,20 +1,46 @@
 import os
 import logging
+import requests
 from pybit.unified_trading import HTTP
 from pybit.exceptions import FailedRequestError
 import httpx
 
 logger = logging.getLogger("BybitBroker")
 
+# CoinGecko symbol map — no API key, no geo-restrictions
+COINGECKO_MAP = {
+    "BTCUSDT":    "bitcoin",
+    "ETHUSDT":    "ethereum",
+    "SOLUSDT":    "solana",
+    "BNBUSDT":    "binancecoin",
+    "XRPUSDT":    "ripple",
+    "ADAUSDT":    "cardano",
+    "DOGEUSDT":   "dogecoin",
+    "AVAXUSDT":   "avalanche-2",
+    "DOTUSDT":    "polkadot",
+    "LINKUSDT":   "chainlink",
+    "LTCUSDT":    "litecoin",
+    "UNIUSDT":    "uniswap",
+    "ATOMUSDT":   "cosmos",
+    "NEARUSDT":   "near",
+    "APTUSDT":    "aptos",
+    "ARBUSDT":    "arbitrum",
+    "OPUSDT":     "optimism",
+    "INJUSDT":    "injective-protocol",
+    "SUIUSDT":    "sui",
+    "TONUSDT":    "the-open-network",
+    "FETUSDT":    "fetch-ai",
+    "RENDERUSDT": "render-token",
+    "WLDUSDT":    "worldcoin-wld",
+    "POLUSDT":    "matic-network",
+}
+
+
 class BybitBroker:
     def __init__(self):
-        # FIX: Two separate sessions:
-        # - market_session: mainnet (testnet=False) → real, live candle data
-        # - trade_session:  testnet (testnet=True)  → safe paper trading
-        # Testnet 1-minute candles are stale/cached and will break all indicators.
         self.market_session = HTTP(
             testnet=False,
-            domain="bybit"  # bybit domain for Nigerian ISP connectivity
+            domain="bybit"
         )
         self.trade_session = HTTP(
             testnet=True,
@@ -24,20 +50,24 @@ class BybitBroker:
         )
 
     def get_current_price(self, symbol: str) -> float:
-        """Uses mainnet market session — always real price"""
+        """Uses CoinGecko — no geo-restrictions, no API key needed."""
+        coin_id = COINGECKO_MAP.get(symbol.upper(), "")
+        if not coin_id:
+            logger.error(f"Unknown symbol: {symbol}")
+            return 0.0
         try:
-            response = self.market_session.get_tickers(category="linear", symbol=symbol)
-            return float(response['result']['list'][0]['lastPrice'])
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            price = float(data[coin_id]["usd"])
+            logger.info(f"✅ CoinGecko {symbol} = ${price:,.2f}")
+            return price
         except Exception as e:
-            logger.error(f"Bybit Price Fetch Failed: {e}")
+            logger.error(f"CoinGecko price fetch failed for {symbol}: {e}")
             return 0.0
 
     def get_price_history(self, symbol: str, interval: str = "1", limit: int = 200):
-        """
-        Uses mainnet market session for real candle data.
-        Testnet candles are stale and will break RSI/BB/Monte Carlo.
-        Also validates data quality before returning.
-        """
+        """Uses Bybit mainnet for candle history — still works from Railway."""
         try:
             response = self.market_session.get_kline(
                 category="linear",
@@ -45,22 +75,19 @@ class BybitBroker:
                 interval=interval,
                 limit=limit
             )
-
-            # Bybit returns newest-first → reverse to chronological order
             candles = response['result']['list'][::-1]
-            prices  = [float(x[4]) for x in candles]  # index 4 = close price
+            prices  = [float(x[4]) for x in candles]
 
-            # DATA QUALITY GUARD: Catch stale/flat data before it poisons indicators
             unique_count = len(set(prices[-20:]))
             if unique_count < 5:
                 logger.error(
                     f"❌ Data quality fail for {symbol}: only {unique_count} unique prices "
-                    f"in last 20 candles. Refusing to trade on stale data."
+                    f"in last 20 candles."
                 )
                 return []
 
             logger.info(f"✅ {symbol} price history: {len(prices)} candles, "
-                        f"{unique_count} unique in last 20, latest=${prices[-1]:,.2f}")
+                        f"latest=${prices[-1]:,.2f}")
             return prices
 
         except Exception as e:
@@ -68,10 +95,7 @@ class BybitBroker:
             return []
 
     def place_bracket_order(self, symbol: str, side: str, notional: float, tp_pct: float, sl_pct: float):
-        """
-        Uses trade_session (testnet) for safe paper order execution.
-        Calculates TP/SL prices from the strategy-suggested percentages.
-        """
+        """Uses trade_session (testnet) for paper order execution."""
         try:
             price = self.get_current_price(symbol)
             if price == 0:
@@ -102,13 +126,16 @@ class BybitBroker:
             return {"error": str(e)}
 
     async def get_last_price(self, symbol: str) -> float:
-        """Async real-time price fetch via mainnet REST (no auth needed)"""
-        url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
+        """Async price via CoinGecko."""
+        coin_id = COINGECKO_MAP.get(symbol.upper(), "")
+        if not coin_id:
+            return 0.0
         try:
-            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url)
                 data     = response.json()
-                return float(data['result']['list'][0]['lastPrice'])
+                return float(data[coin_id]["usd"])
         except Exception as e:
-            logger.error(f"Failed to fetch async price for {symbol}: {e}")
+            logger.error(f"CoinGecko async price failed for {symbol}: {e}")
             return 0.0

@@ -445,45 +445,71 @@ async def analyse_stock(
 
 @app.get("/api/instruments")
 async def get_instruments():
-    url = "https://api.bybit.com/v5/market/tickers?category=linear"
-    SYMBOLS_TO_TRACK = {
-        "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT",
-        "ADAUSDT","AVAXUSDT","DOTUSDT","POLUSDT","LINKUSDT","UNIUSDT",
-        "LTCUSDT","ATOMUSDT","NEARUSDT","APTUSDT","ARBUSDT","OPUSDT",
-        "INJUSDT","SUIUSDT","TONUSDT","FETUSDT","RENDERUSDT","WLDUSDT",
-    }
+    """Fetches prices from CoinGecko — no US IP restrictions."""
+    SYMBOLS = [
+        ("BTCUSDT",    "bitcoin"),
+        ("ETHUSDT",    "ethereum"),
+        ("SOLUSDT",    "solana"),
+        ("BNBUSDT",    "binancecoin"),
+        ("XRPUSDT",    "ripple"),
+        ("DOGEUSDT",   "dogecoin"),
+        ("ADAUSDT",    "cardano"),
+        ("AVAXUSDT",   "avalanche-2"),
+        ("DOTUSDT",    "polkadot"),
+        ("POLUSDT",    "matic-network"),
+        ("LINKUSDT",   "chainlink"),
+        ("UNIUSDT",    "uniswap"),
+        ("LTCUSDT",    "litecoin"),
+        ("ATOMUSDT",   "cosmos"),
+        ("NEARUSDT",   "near"),
+        ("APTUSDT",    "aptos"),
+        ("ARBUSDT",    "arbitrum"),
+        ("OPUSDT",     "optimism"),
+        ("INJUSDT",    "injective-protocol"),
+        ("SUIUSDT",    "sui"),
+        ("TONUSDT",    "the-open-network"),
+        ("FETUSDT",    "fetch-ai"),
+        ("RENDERUSDT", "render-token"),
+        ("WLDUSDT",    "worldcoin-wld"),
+    ]
+
+    coin_ids = ",".join(cg for _, cg in SYMBOLS)
+    url = (
+        f"https://api.coingecko.com/api/v3/coins/markets"
+        f"?vs_currency=usd&ids={coin_ids}&order=market_cap_desc"
+        f"&per_page=50&page=1&price_change_percentage=24h"
+    )
+
     try:
-        async with httpx.AsyncClient(timeout=8.0, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url)
-        data        = response.json()
-        all_tickers = data.get("result", {}).get("list", [])
-        filtered = []
-        for item in all_tickers:
-            symbol = item.get("symbol", "")
-            if symbol not in SYMBOLS_TO_TRACK:
+        data = response.json()
+
+        cg_map = {item["id"]: item for item in data}
+        result = []
+
+        for symbol, cg_id in SYMBOLS:
+            item = cg_map.get(cg_id)
+            if not item:
                 continue
-            try:
-                last_price = float(item.get("lastPrice",    0) or 0)
-                change_pct = float(item.get("price24hPcnt", 0) or 0) * 100
-                volume     = float(item.get("volume24h",    0) or 0)
-                filtered.append({
-                    "pair":     symbol.replace("USDT", "/USDT"),
-                    "symbol":   symbol,
-                    "price":    f"{last_price:,.2f}",
-                    "change":   f"{change_pct:+.2f}%",
-                    "vol":      f"{volume/1_000_000:.1f}M" if volume >= 1_000_000 else f"{volume/1000:.1f}K",
-                    "momentum": "Strong Buy" if change_pct > 1 else "Buy" if change_pct > 0 else "Sell" if change_pct < -1 else "Neutral",
-                })
-            except Exception:
-                continue
-        filtered.sort(
-            key=lambda x: float(x["vol"].replace("M","000").replace("K","").replace(",","")),
-            reverse=True,
-        )
-        return filtered
+            price      = item.get("current_price", 0) or 0
+            change_pct = item.get("price_change_percentage_24h", 0) or 0
+            volume     = item.get("total_volume", 0) or 0
+
+            result.append({
+                "pair":     symbol.replace("USDT", "/USDT"),
+                "symbol":   symbol,
+                "price":    f"{price:,.2f}",
+                "change":   f"{change_pct:+.2f}%",
+                "vol":      f"{volume/1_000_000:.1f}M" if volume >= 1_000_000 else f"{volume/1000:.1f}K",
+                "momentum": "Strong Buy" if change_pct > 1 else "Buy" if change_pct > 0 else "Sell" if change_pct < -1 else "Neutral",
+            })
+
+        return result
+
     except Exception as e:
-        logger.error(f"[Instruments] Error: {e}")
-        return []# env fix Tue, Apr 21, 2026  7:33:29 PM
+        logger.error(f"[Instruments] CoinGecko error: {e}")
+        return []
 @app.get("/api/candles")
 async def get_candles(
     symbol:   str = Query(...),
