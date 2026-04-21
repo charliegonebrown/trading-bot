@@ -36,16 +36,14 @@ async function fetchHistoricalKlines(symbol, timeframe, limit = 100) {
       `${BACKEND}/api/stock/candles?symbol=${symbol.toUpperCase()}&interval=${timeframe}&limit=${limit}`
     );
     if (!res.ok) throw new Error(`Stock candles HTTP ${res.status}`);
-    return await res.json(); // already [{time, open, high, low, close}]
+    return await res.json();
   }
 
-  // Crypto — KuCoin via Railway backend
   const bybitInterval = INTERVAL_MAP[timeframe] || "1";
   const url = `${BACKEND}/api/candles?symbol=${symbol.toUpperCase()}&interval=${bybitInterval}&limit=${limit}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
-  // /api/candles returns [{time, open, high, low, close}] directly
   return json.map((item) => ({
     time:  item.time,
     open:  item.open,
@@ -77,7 +75,6 @@ export default function LiveChart({ symbol: propSymbol }) {
     }
   }, [propSymbol]);
 
-  // Chart init — runs once only
   useEffect(() => {
     const container = chartContainerRef.current;
     if (!container) return;
@@ -166,7 +163,7 @@ export default function LiveChart({ symbol: propSymbol }) {
       setPriceColor(last.close >= last.open ? COLORS.up : COLORS.down);
     }
 
-    // Stocks — poll price every 15s
+    // Stocks — poll every 15s via Alpaca backend
     if (isStock(activeSymbol)) {
       setConnStatus("live");
       const pollStock = async () => {
@@ -182,41 +179,20 @@ export default function LiveChart({ symbol: propSymbol }) {
       return;
     }
 
-    // Crypto — Bybit WebSocket for real-time updates
-    const ws = new WebSocket("wss://stream.bybit.com/v5/public/linear");
-    const bybitInterval = INTERVAL_MAP[timeframe] || "1";
-
-    ws.onopen = () => {
-      setConnStatus("live");
-      ws.send(JSON.stringify({
-        op: "subscribe",
-        args: [`kline.${bybitInterval}.${activeSymbol}`],
-      }));
+    // Crypto — poll KuCoin price every 10 seconds via Railway backend
+    setConnStatus("live");
+    const pollCrypto = async () => {
+      try {
+        const r = await fetch(`${BACKEND}/api/price?symbol=${activeSymbol}`);
+        const d = await r.json();
+        if (d.price && candleSeriesRef.current) {
+          setPrice(d.price);
+        }
+      } catch {}
     };
-
-    ws.onmessage = (e) => {
-      const resp = JSON.parse(e.data);
-      if (resp.topic?.startsWith("kline")) {
-        const k = resp.data[0];
-        if (!candleSeriesRef.current) return;
-        candleSeriesRef.current.update({
-          time:  parseInt(k.start) / 1000,
-          open:  parseFloat(k.open),
-          high:  parseFloat(k.high),
-          low:   parseFloat(k.low),
-          close: parseFloat(k.close),
-        });
-        const cp = parseFloat(k.close);
-        setPrice(cp);
-        setPriceColor(cp >= parseFloat(k.open) ? COLORS.up : COLORS.down);
-      }
-    };
-
-    ws.onerror = () => setConnStatus("error");
-    ws.onclose = () => {
-      if (wsRef.current === ws) setConnStatus("disconnected");
-    };
-    wsRef.current = ws;
+    pollCrypto();
+    const pollId = setInterval(pollCrypto, 10000);
+    wsRef.current = { close: () => clearInterval(pollId), onmessage: null };
 
   }, [activeSymbol, timeframe]);
 

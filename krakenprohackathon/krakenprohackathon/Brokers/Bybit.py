@@ -39,36 +39,30 @@ class BybitBroker:
             logger.error(f"KuCoin price fetch failed for {symbol}: {e}")
             return 0.0
     def get_price_history(self, symbol: str, interval: str = "1", limit: int = 200):
-        """
-        Uses Bybit mainnet for candle/OHLCV history.
-        Bybit kline endpoint works from US IPs — only ticker endpoint is blocked.
-        """
+        """Uses KuCoin for candle history — no geo-restrictions."""
+        INTERVAL_MAP = {
+            "1":"1min","3":"3min","5":"5min","15":"15min","30":"30min",
+            "60":"1hour","120":"2hour","240":"4hour","360":"6hour",
+            "720":"8hour","D":"1day","W":"1week",
+        }
+        kc_interval = INTERVAL_MAP.get(interval, "1min")
+        base      = symbol.upper().replace("USDT", "")
+        kc_symbol = f"{base}-USDT"
         try:
-            response = self.market_session.get_kline(
-                category="linear",
-                symbol=symbol,
-                interval=interval,
-                limit=limit
-            )
-            candles = response['result']['list'][::-1]
-            prices  = [float(x[4]) for x in candles]
+            url = f"https://api.kucoin.com/api/v1/market/candles?type={kc_interval}&symbol={kc_symbol}"
+            response = requests.get(url, timeout=10)
+            data     = response.json()
+            candles  = data["data"][::-1]  # newest first → reverse to chronological
+            prices   = [float(c[2]) for c in candles]  # index 2 = close price
 
-            unique_count = len(set(prices[-20:]))
-            if unique_count < 5:
-                logger.error(
-                    f"❌ Data quality fail for {symbol}: only {unique_count} unique "
-                    f"prices in last 20 candles."
-                )
+            if len(prices) < 30:
+                logger.error(f"Not enough candles for {symbol}: got {len(prices)}")
                 return []
 
-            logger.info(
-                f"✅ {symbol} price history: {len(prices)} candles, "
-                f"latest=${prices[-1]:,.2f}"
-            )
+            logger.info(f"✅ KuCoin {symbol}: {len(prices)} candles, latest=${prices[-1]:,.2f}")
             return prices
-
         except Exception as e:
-            logger.error(f"Bybit History Fetch Failed: {e}")
+            logger.error(f"KuCoin history failed for {symbol}: {e}")
             return []
 
     def place_bracket_order(
