@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+
+  # ─── PostgreSQL ─────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     trading_user
+      POSTGRES_PASSWORD: trading_pass
+      POSTGRES_DB:       trading_bot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading_user -d trading_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Trading Bot API ─────────────────────────────────────────────────────────
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # PostgreSQL connection — points to the 'db' service above
+      DATABASE_URL: postgresql+psycopg2://trading_user:trading_pass@db:5432/trading_bot
+
+      # Broker credentials — override with real values or use a .env file
+      BYBIT_API_KEY:       ${BYBIT_API_KEY:-}
+      BYBIT_SECRET_KEY:    ${BYBIT_SECRET_KEY:-}
+      ALPACA_API_KEY:      ${ALPACA_API_KEY:-}
+      ALPACA_SECRET_KEY:   ${ALPACA_SECRET_KEY:-}
+      ALPACA_BASE_URL:     ${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}
+      GOOGLE_API_KEY:      ${GOOGLE_API_KEY:-}
+
+      # CORS: comma-separated frontend origins, or '*' for dev
+      ALLOWED_ORIGINS:     ${ALLOWED_ORIGINS:-*}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

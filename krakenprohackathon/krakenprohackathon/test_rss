@@ -1,0 +1,63 @@
+"""
+Run: python test_rss2.py
+Tests rss2json proxy AND direct RSS from Python to find what works.
+"""
+import httpx, asyncio, json
+
+async def test():
+    # Test 1: rss2json proxy
+    print("=== TEST 1: rss2json.com proxy ===")
+    url = "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fcointelegraph.com%2Frss"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url)
+        print(f"  Status: {r.status_code}")
+        if r.status_code == 200:
+            d = r.json()
+            print(f"  rss2json status: {d.get('status')}")
+            items = d.get('items', [])
+            print(f"  Items: {len(items)}")
+            if items:
+                print(f"  First: {items[0].get('title','')[:80]}")
+        else:
+            print(f"  Body: {r.text[:200]}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Test 2: Direct fetch with browser headers
+    print("\n=== TEST 2: Direct RSS with browser headers ===")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=headers) as client:
+            r = await client.get("https://cointelegraph.com/rss")
+        print(f"  Status: {r.status_code}")
+        print(f"  Content-Type: {r.headers.get('content-type','')}")
+        print(f"  Body preview: {r.text[:200]}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Test 3: Try a simple HTTP request to see if backend has internet at all
+    print("\n=== TEST 3: Basic internet check ===")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get("https://httpbin.org/get")
+        print(f"  httpbin.org: {r.status_code} ✅" if r.status_code == 200 else f"  httpbin.org: {r.status_code}")
+    except Exception as e:
+        print(f"  httpbin.org: ERROR — {e}")
+
+    # Test 4: Bybit (we know this works)
+    print("\n=== TEST 4: Bybit API (known working) ===")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get("https://api.bytick.com/v5/market/tickers?category=linear&symbol=BTCUSDT")
+        print(f"  Bybit: {r.status_code} ✅" if r.status_code == 200 else f"  Bybit: {r.status_code}")
+    except Exception as e:
+        print(f"  Bybit: ERROR — {e}")
+
+asyncio.run(test())

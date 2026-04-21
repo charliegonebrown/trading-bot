@@ -1,0 +1,43 @@
+# Secrets — NEVER commit these
+.env
+*.env
+
+# SQLite (dev fallback only — not used in production)
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/

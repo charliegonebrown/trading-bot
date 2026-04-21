@@ -1,0 +1,27 @@
+# ─── Web framework ───────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# ─── Database ────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10      # PostgreSQL driver (binary = no libpq-dev needed)
+alembic==1.14.0
+
+# ─── Scheduling ──────────────────────────────────────────────────────────────
+apscheduler==3.10.4
+
+# ─── Brokers ─────────────────────────────────────────────────────────────────
+pybit==5.8.0
+alpaca-trade-api==3.3.0
+httpx==0.27.2
+
+# ─── Data / Math ─────────────────────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.3
+
+# ─── AI (optional — only needed if USE_GEMINI=True) ─────────────────────────
+google-generativeai==0.8.3
+
+# ─── Config ──────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1
