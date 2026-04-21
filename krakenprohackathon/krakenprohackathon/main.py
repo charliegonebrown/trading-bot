@@ -31,7 +31,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─── SCHEDULER (module-level so lifespan can stop it) ────────────────────────
 scheduler = AsyncIOScheduler()
 
 CRYPTO_SYMBOLS = [
@@ -68,25 +67,14 @@ def run_trade_monitor():
         db.close()
 
 
-# ─── LIFESPAN (replaces deprecated @app.on_event) ────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── STARTUP ──────────────────────────────────────────────────────────────
     logger.info("Starting up...")
 
-    # Run Alembic migrations automatically on boot
-    try:
-        from alembic.config import Config
-        from alembic import command as alembic_command
-
-        alembic_cfg = Config(str(Path(__file__).parent / "alembic.ini"))
-        alembic_cfg.set_main_option("script_location", str(Path(__file__).parent / "alembic"))
-        alembic_command.upgrade(alembic_cfg, "head")
-        logger.info("✅ Database migrations applied (alembic upgrade head)")
-    except Exception as e:
-        # Fallback: let SQLAlchemy create tables directly (works for SQLite)
-        logger.warning(f"Alembic migration failed ({e}) — falling back to create_all")
-        Base.metadata.create_all(bind=engine)
+    # Create database tables directly — no alembic needed
+    Base.metadata.create_all(bind=engine)
+    logger.info("✅ Database tables created")
 
     # DB connectivity check
     if check_db_connection():
@@ -96,9 +84,9 @@ async def lifespan(app: FastAPI):
 
     # API key checks
     for key, label in [
-        ("GOOGLE_API_KEY",     "Google / Gemini"),
-        ("BYBIT_API_KEY",      "Bybit"),
-        ("ALPACA_API_KEY",     "Alpaca"),
+        ("GOOGLE_API_KEY", "Google / Gemini"),
+        ("BYBIT_API_KEY",  "Bybit"),
+        ("ALPACA_API_KEY", "Alpaca"),
     ]:
         val = os.getenv(key, "")
         if val:
@@ -107,26 +95,24 @@ async def lifespan(app: FastAPI):
             logger.warning(f"⚠️  {label} key NOT found — related features disabled")
 
     # Start scheduler
-    scheduler.add_job(run_hybrid_cycles, "interval", hours=1,     id="main_hybrid_cycle")
-    scheduler.add_job(run_trade_monitor, "interval", seconds=10,  id="trade_monitor")
+    scheduler.add_job(run_hybrid_cycles, "interval", hours=1,    id="main_hybrid_cycle")
+    scheduler.add_job(run_trade_monitor, "interval", seconds=10, id="trade_monitor")
     scheduler.start()
     logger.info("✅ Scheduler started — analysis every 1h, monitor every 10s")
 
-    yield  # ── APPLICATION RUNS ──────────────────────────────────────────────
+    yield
 
     # ── SHUTDOWN ─────────────────────────────────────────────────────────────
     scheduler.shutdown(wait=False)
     logger.info("Scheduler stopped. Shutdown complete.")
 
 
-# ─── APP ─────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Autonomous Hybrid AI Trading Bot",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# CORS — restrict origins in production via ALLOWED_ORIGINS env var
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",")] if _raw_origins != "*" else ["*"]
 
@@ -137,13 +123,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── ROUTERS ─────────────────────────────────────────────────────────────────
 app.include_router(trades_router.router,    prefix="/api/trades")
 app.include_router(portfolio_router.router, prefix="/api/portfolio")
 app.include_router(settings_router.router,  prefix="/api/settings")
 
 
-# ─── CORE ENDPOINTS ──────────────────────────────────────────────────────────
 @app.get("/")
 def root():
     return {
@@ -162,22 +146,18 @@ def health():
     }
 
 
-# ─── DEBUG: manual monitor trigger ───────────────────────────────────────────
 @app.get("/api/monitor/run")
 def trigger_monitor():
     db = SessionLocal()
     try:
-        from models import Trade, Portfolio, TradeStatus
-
+        from models import Trade, TradeStatus
         all_trades  = db.query(Trade).all()
         open_trades = [t for t in all_trades if t.status == TradeStatus.OPEN]
-
         report = {
             "total_trades": len(all_trades),
             "open_trades":  len(open_trades),
             "trades":       [],
         }
-
         broker = BybitBroker()
         for trade in open_trades:
             live_price = broker.get_current_price(trade.symbol)
@@ -204,12 +184,10 @@ def trigger_monitor():
                     (trade.entry_price or 0) * (trade.quantity or 0), 2
                 ),
             })
-
         crypto_agent = HybridTradingAgent(broker, MarketType.CRYPTO)
         crypto_agent.monitor_open_trades(db)
         report["monitor_ran"] = True
         return report
-
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
@@ -217,7 +195,6 @@ def trigger_monitor():
         db.close()
 
 
-# ─── ANALYSIS ENDPOINTS ───────────────────────────────────────────────────────
 VALID_INTERVALS = {"1","3","5","15","30","60","120","240","360","720","D","W","M"}
 
 @app.get("/api/analyse")
@@ -226,18 +203,12 @@ async def analyse_symbol(
     interval: str = Query("60", description="Candle interval: 1|15|60|240|D"),
 ):
     if interval not in VALID_INTERVALS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid interval '{interval}'. Must be one of: {sorted(VALID_INTERVALS)}",
-        )
+        raise HTTPException(status_code=422, detail=f"Invalid interval '{interval}'.")
     try:
         broker = BybitBroker()
         prices = broker.get_price_history(symbol, interval=interval, limit=200)
         if not prices or len(prices) < 30:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Not enough candles for {symbol} at interval={interval} — got {len(prices)}, need 30+",
-            )
+            raise HTTPException(status_code=422, detail=f"Not enough candles for {symbol}")
         math_signal  = get_triple_confirmation_signal(prices)
         final_signal = await get_hybrid_ai_signal(
             symbol=symbol, prices=prices,
@@ -262,7 +233,7 @@ async def analyse_symbol(
 
 
 @app.get("/api/price")
-async def get_price(symbol: str = Query(..., description="e.g. BTCUSDT")):
+async def get_price(symbol: str = Query(...)):
     try:
         broker = BybitBroker()
         price  = broker.get_current_price(symbol)
@@ -353,7 +324,6 @@ async def get_market_news():
     return articles[:12]
 
 
-# ─── STOCK ENDPOINTS ─────────────────────────────────────────────────────────
 @app.get("/api/stock/price")
 async def get_stock_price(symbol: str = Query(...)):
     try:
