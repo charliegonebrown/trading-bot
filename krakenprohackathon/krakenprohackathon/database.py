@@ -12,9 +12,10 @@ logger = logging.getLogger(__name__)
 #   1. DATABASE_URL env var  (Railway / Render / Heroku set this automatically)
 #   2. Individual PG env vars (manual hosting)
 #   3. SQLite fallback        (local dev only — never use in production)
+# Force read from Railway environment — never from .env file
 import os
-print(f"DEBUG DATABASE_URL = {os.getenv('DATABASE_URL', 'NOT FOUND')}")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+_db_url = os.environ.get("DATABASE_URL", "")
+print(f"ENV CHECK: DATABASE_URL={'SET' if _db_url else 'NOT SET'}, value starts with: {_db_url[:20] if _db_url else 'EMPTY'}")
 
 # Railway/Heroku Postgres URLs sometimes start with "postgres://" — SQLAlchemy
 # requires "postgresql+psycopg2://"
