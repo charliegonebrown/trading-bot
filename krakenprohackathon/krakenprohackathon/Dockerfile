@@ -22,4 +22,4 @@ RUN chmod +x start.py
 
 USER appuser
 
-CMD ["python", "start.py"]
+CMD ["python", "start.py"]# force rebuild Tue, Apr 21, 2026  7:07:24 PM
