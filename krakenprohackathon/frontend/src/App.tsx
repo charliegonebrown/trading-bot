@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import LiveChart from "./LiveChart";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 // ─── Full Market Data ─────────────────────────────────────────────────────────
 const MARKET_DATA = {
