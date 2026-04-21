@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createChart, CandlestickSeries, ColorType, CrosshairMode } from "lightweight-charts";
 
-const API_BASE = "http://127.0.0.1:8000";
-
-const CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"];
-const STOCK_SYMBOLS  = [
+const STOCK_SYMBOLS = [
   "AAPL","MSFT","GOOGL","GOOG","AMZN","META","NVDA","TSLA","NFLX","AMD",
   "INTC","QCOM","AVGO","MU","AMAT","LRCX","KLAC","MRVL","TXN","ADI",
   "JPM","BAC","GS","MS","WFC","C","BLK","AXP","V","MA",
@@ -15,10 +12,15 @@ const STOCK_SYMBOLS  = [
   "PLTR","SNOW","CRWD","ZS","NET","DDOG","MDB","BILL","HUBS","SHOP",
   "RIVN","LCID","NIO","LI","XPEV","ENPH","SEDG","FSLR","PLUG","BE",
 ];
-const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
-// Detect if a symbol is a stock (no USDT suffix, in stock list or not a crypto)
-const isStock = (symbol) => STOCK_SYMBOLS.includes(symbol?.toUpperCase()) ||
+const CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"];
+const INTERVALS      = ["1m", "5m", "15m", "1h", "4h", "1d"];
+const INTERVAL_MAP   = { "1m":"1","5m":"5","15m":"15","1h":"60","4h":"240","1d":"D" };
+
+const BACKEND = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
+
+const isStock = (symbol) =>
+  STOCK_SYMBOLS.includes(symbol?.toUpperCase()) ||
   (!symbol?.toUpperCase().endsWith("USDT") && !symbol?.toUpperCase().endsWith("BTC"));
 
 const COLORS = {
@@ -27,29 +29,29 @@ const COLORS = {
 };
 
 const CHART_HEIGHT = 350;
-const INTERVAL_MAP = { "1m":"1","5m":"5","15m":"15","1h":"60","4h":"240","1d":"D" };
 
 async function fetchHistoricalKlines(symbol, timeframe, limit = 100) {
-  // Route stocks to Alpaca backend, crypto to Bybit
   if (isStock(symbol)) {
-    const res = await fetch(`${API_BASE}/api/stock/candles?symbol=${symbol.toUpperCase()}&interval=${timeframe}&limit=${limit}`);
+    const res = await fetch(
+      `${BACKEND}/api/stock/candles?symbol=${symbol.toUpperCase()}&interval=${timeframe}&limit=${limit}`
+    );
     if (!res.ok) throw new Error(`Stock candles HTTP ${res.status}`);
-    return await res.json();  // already [{time, open, high, low, close}]
+    return await res.json(); // already [{time, open, high, low, close}]
   }
 
-  // Crypto — Bybit via corsproxy
+  // Crypto — KuCoin via Railway backend
   const bybitInterval = INTERVAL_MAP[timeframe] || "1";
-  const API_BASE = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
-  const proxyUrl = `${API_BASE}/api/candles?symbol=${symbol.toUpperCase()}&interval=${bybitInterval}&limit=${limit}`;
-  const res  = await fetch(proxyUrl);
+  const url = `${BACKEND}/api/candles?symbol=${symbol.toUpperCase()}&interval=${bybitInterval}&limit=${limit}`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
-  return json.result.list.reverse().map((item) => ({
-    time:  parseInt(item[0]) / 1000,
-    open:  parseFloat(item[1]),
-    high:  parseFloat(item[2]),
-    low:   parseFloat(item[3]),
-    close: parseFloat(item[4]),
+  // /api/candles returns [{time, open, high, low, close}] directly
+  return json.map((item) => ({
+    time:  item.time,
+    open:  item.open,
+    high:  item.high,
+    low:   item.low,
+    close: item.close,
   }));
 }
 
@@ -60,7 +62,6 @@ export default function LiveChart({ symbol: propSymbol }) {
   const wsRef             = useRef(null);
   const roRef             = useRef(null);
 
-  // FIX 1: initialise directly from propSymbol — no race on first render
   const [activeSymbol, setActiveSymbol] = useState(
     propSymbol ? propSymbol.toUpperCase() : "BTCUSDT"
   );
@@ -70,7 +71,6 @@ export default function LiveChart({ symbol: propSymbol }) {
   const [change,     setChange]     = useState(null);
   const [connStatus, setConnStatus] = useState("connecting");
 
-  // FIX 2: sync prop → state only when it actually differs
   useEffect(() => {
     if (propSymbol && propSymbol.toUpperCase() !== activeSymbol) {
       setActiveSymbol(propSymbol.toUpperCase());
@@ -133,21 +133,17 @@ export default function LiveChart({ symbol: propSymbol }) {
   const connect = useCallback(async () => {
     if (!candleSeriesRef.current) return;
 
-    // FIX 3: kill old WS and null its onmessage BEFORE anything else
-    // so stale messages from the old symbol can never update state
     if (wsRef.current) {
       wsRef.current.onmessage = null;
       wsRef.current.close();
       wsRef.current = null;
     }
 
-    // FIX 4: clear old candle data so old symbol's price scale is gone
     candleSeriesRef.current.setData([]);
     setPrice(null);
     setChange(null);
     setConnStatus("connecting");
 
-    // Fetch fresh history for the new symbol
     let history;
     try {
       history = await fetchHistoricalKlines(activeSymbol, timeframe);
@@ -157,30 +153,27 @@ export default function LiveChart({ symbol: propSymbol }) {
       return;
     }
 
-    // Guard: component unmounted or symbol changed again while fetching
     if (!candleSeriesRef.current) return;
 
     candleSeriesRef.current.setData(history);
     chartRef.current?.timeScale().fitContent();
 
     if (history.length) {
-      const last = history[history.length - 1];
+      const last  = history[history.length - 1];
       const first = history[0];
       setPrice(last.close);
       setChange(((last.close - first.open) / first.open) * 100);
       setPriceColor(last.close >= last.open ? COLORS.up : COLORS.down);
     }
 
-    // Stocks: no WebSocket — poll price every 15s via Alpaca backend
+    // Stocks — poll price every 15s
     if (isStock(activeSymbol)) {
       setConnStatus("live");
       const pollStock = async () => {
         try {
-          const r = await fetch(`${API_BASE}/api/stock/price?symbol=${activeSymbol}`);
+          const r = await fetch(`${BACKEND}/api/stock/price?symbol=${activeSymbol}`);
           const d = await r.json();
-          if (d.price && candleSeriesRef.current) {
-            setPrice(d.price);
-          }
+          if (d.price && candleSeriesRef.current) setPrice(d.price);
         } catch {}
       };
       pollStock();
@@ -189,7 +182,7 @@ export default function LiveChart({ symbol: propSymbol }) {
       return;
     }
 
-    // Crypto: Bybit WebSocket
+    // Crypto — Bybit WebSocket for real-time updates
     const ws = new WebSocket("wss://stream.bybit.com/v5/public/linear");
     const bybitInterval = INTERVAL_MAP[timeframe] || "1";
 
@@ -197,7 +190,7 @@ export default function LiveChart({ symbol: propSymbol }) {
       setConnStatus("live");
       ws.send(JSON.stringify({
         op: "subscribe",
-        args: [`kline.${bybitInterval}.${activeSymbol}`]
+        args: [`kline.${bybitInterval}.${activeSymbol}`],
       }));
     };
 
@@ -220,7 +213,9 @@ export default function LiveChart({ symbol: propSymbol }) {
     };
 
     ws.onerror = () => setConnStatus("error");
-    ws.onclose = () => { if (wsRef.current === ws) setConnStatus("disconnected"); };
+    ws.onclose = () => {
+      if (wsRef.current === ws) setConnStatus("disconnected");
+    };
     wsRef.current = ws;
 
   }, [activeSymbol, timeframe]);
@@ -245,7 +240,9 @@ export default function LiveChart({ symbol: propSymbol }) {
 
   const formatPrice = (p) => {
     if (p == null) return "—";
-    return p >= 1000 ? p.toLocaleString(undefined, { minimumFractionDigits: 2 }) : p.toFixed(4);
+    return p >= 1000
+      ? p.toLocaleString(undefined, { minimumFractionDigits: 2 })
+      : p.toFixed(4);
   };
 
   const btnStyle = (active) => ({
@@ -263,10 +260,17 @@ export default function LiveChart({ symbol: propSymbol }) {
       fontFamily: "'IBM Plex Mono', monospace",
       display: "flex", flexDirection: "column",
     }}>
-      <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+      <link
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+        rel="stylesheet"
+      />
 
       {/* Symbol + interval toolbar */}
-      <div style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}`, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{
+        background: COLORS.surface,
+        borderBottom: `1px solid ${COLORS.border}`,
+        padding: "10px 14px", display: "flex", alignItems: "center", gap: 12,
+      }}>
         <div style={{ display: "flex", gap: 4 }}>
           {CRYPTO_SYMBOLS.map((s) => (
             <button key={s} onClick={() => setActiveSymbol(s)} style={btnStyle(activeSymbol === s)}>
@@ -284,7 +288,11 @@ export default function LiveChart({ symbol: propSymbol }) {
       </div>
 
       {/* Price bar */}
-      <div style={{ padding: "8px 14px", borderBottom: `1px solid ${COLORS.border}`, display: "flex", alignItems: "baseline", gap: 10 }}>
+      <div style={{
+        padding: "8px 14px",
+        borderBottom: `1px solid ${COLORS.border}`,
+        display: "flex", alignItems: "baseline", gap: 10,
+      }}>
         <span style={{ fontSize: 20, fontWeight: 500, color: priceColor }}>
           {formatPrice(price)}
         </span>
@@ -293,17 +301,25 @@ export default function LiveChart({ symbol: propSymbol }) {
             {change >= 0 ? "+" : ""}{change.toFixed(2)}%
           </span>
         )}
-        <span style={{ marginLeft: "auto", fontSize: 10, display: "flex", alignItems: "center", gap: 5, color: COLORS.muted }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusDot.color }} />
+        <span style={{
+          marginLeft: "auto", fontSize: 10,
+          display: "flex", alignItems: "center", gap: 5, color: COLORS.muted,
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: "50%", background: statusDot.color,
+          }} />
           {statusDot.label}
         </span>
       </div>
 
       {/* Chart canvas */}
-      <div ref={chartContainerRef} style={{
-        width: "100%", height: `${CHART_HEIGHT}px`,
-        padding: "10px 10px 25px 10px", boxSizing: "border-box",
-      }} />
+      <div
+        ref={chartContainerRef}
+        style={{
+          width: "100%", height: `${CHART_HEIGHT}px`,
+          padding: "10px 10px 25px 10px", boxSizing: "border-box",
+        }}
+      />
     </div>
   );
 }
