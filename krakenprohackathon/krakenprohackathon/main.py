@@ -445,57 +445,29 @@ async def analyse_stock(
 
 @app.get("/api/instruments")
 async def get_instruments():
-    """Fetches prices from CoinGecko — no US IP restrictions."""
-    SYMBOLS = [
-        ("BTCUSDT",    "bitcoin"),
-        ("ETHUSDT",    "ethereum"),
-        ("SOLUSDT",    "solana"),
-        ("BNBUSDT",    "binancecoin"),
-        ("XRPUSDT",    "ripple"),
-        ("DOGEUSDT",   "dogecoin"),
-        ("ADAUSDT",    "cardano"),
-        ("AVAXUSDT",   "avalanche-2"),
-        ("DOTUSDT",    "polkadot"),
-        ("POLUSDT",    "matic-network"),
-        ("LINKUSDT",   "chainlink"),
-        ("UNIUSDT",    "uniswap"),
-        ("LTCUSDT",    "litecoin"),
-        ("ATOMUSDT",   "cosmos"),
-        ("NEARUSDT",   "near"),
-        ("APTUSDT",    "aptos"),
-        ("ARBUSDT",    "arbitrum"),
-        ("OPUSDT",     "optimism"),
-        ("INJUSDT",    "injective-protocol"),
-        ("SUIUSDT",    "sui"),
-        ("TONUSDT",    "the-open-network"),
-        ("FETUSDT",    "fetch-ai"),
-        ("RENDERUSDT", "render-token"),
-        ("WLDUSDT",    "worldcoin-wld"),
+    """Uses Binance 24hr ticker — no geo-restrictions, real-time data."""
+    SYMBOLS_TO_TRACK = [
+        "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT",
+        "ADAUSDT","AVAXUSDT","DOTUSDT","LINKUSDT","UNIUSDT",
+        "LTCUSDT","ATOMUSDT","NEARUSDT","APTUSDT","ARBUSDT","OPUSDT",
+        "INJUSDT","SUIUSDT","FETUSDT",
     ]
-
-    coin_ids = ",".join(cg for _, cg in SYMBOLS)
-    url = (
-        f"https://api.coingecko.com/api/v3/coins/markets"
-        f"?vs_currency=usd&ids={coin_ids}&order=market_cap_desc"
-        f"&per_page=50&page=1&price_change_percentage=24h"
-    )
-
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url)
-        data = response.json()
+            response = await client.get(
+                "https://api.binance.com/api/v3/ticker/24hr"
+            )
+        data       = response.json()
+        ticker_map = {item["symbol"]: item for item in data}
+        result     = []
 
-        cg_map = {item["id"]: item for item in data}
-        result = []
-
-        for symbol, cg_id in SYMBOLS:
-            item = cg_map.get(cg_id)
+        for symbol in SYMBOLS_TO_TRACK:
+            item = ticker_map.get(symbol)
             if not item:
                 continue
-            price      = item.get("current_price", 0) or 0
-            change_pct = item.get("price_change_percentage_24h", 0) or 0
-            volume     = item.get("total_volume", 0) or 0
-
+            price      = float(item.get("lastPrice",          0) or 0)
+            change_pct = float(item.get("priceChangePercent", 0) or 0)
+            volume     = float(item.get("quoteVolume",        0) or 0)
             result.append({
                 "pair":     symbol.replace("USDT", "/USDT"),
                 "symbol":   symbol,
@@ -505,10 +477,14 @@ async def get_instruments():
                 "momentum": "Strong Buy" if change_pct > 1 else "Buy" if change_pct > 0 else "Sell" if change_pct < -1 else "Neutral",
             })
 
+        result.sort(
+            key=lambda x: float(x["vol"].replace("M","000").replace("K","").replace(",","")),
+            reverse=True,
+        )
         return result
 
     except Exception as e:
-        logger.error(f"[Instruments] CoinGecko error: {e}")
+        logger.error(f"[Instruments] Binance error: {e}")
         return []
 @app.get("/api/candles")
 async def get_candles(
@@ -516,15 +492,31 @@ async def get_candles(
     interval: str = Query("1"),
     limit:    int = Query(100),
 ):
+    """Uses Binance kline API — no geo-restrictions."""
+    # Map Bybit intervals to Binance intervals
+    INTERVAL_MAP = {
+        "1": "1m", "3": "3m", "5": "5m", "15": "15m",
+        "30": "30m", "60": "1h", "120": "2h", "240": "4h",
+        "360": "6h", "720": "12h", "D": "1d", "W": "1w", "M": "1M",
+    }
+    binance_interval = INTERVAL_MAP.get(interval, "1m")
     try:
-        broker  = BybitBroker()
-        response = broker.market_session.get_kline(
-            category="linear",
-            symbol=symbol,
-            interval=interval,
-            limit=limit
+        url = (
+            f"https://api.binance.com/api/v3/klines"
+            f"?symbol={symbol.upper()}&interval={binance_interval}&limit={limit}"
         )
-        candles = response['result']['list'][::-1]
-        return [{"time": int(c[0])//1000, "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])} for c in candles]
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
+        data = response.json()
+        return [
+            {
+                "time":  int(c[0]) // 1000,
+                "open":  float(c[1]),
+                "high":  float(c[2]),
+                "low":   float(c[3]),
+                "close": float(c[4]),
+            }
+            for c in data
+        ]
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
