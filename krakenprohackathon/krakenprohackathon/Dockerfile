@@ -3,7 +3,6 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# System deps for psycopg2-binary and numpy builds
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
@@ -16,19 +15,21 @@ RUN pip install --no-cache-dir --upgrade pip \
 # ─── Runtime stage ────────────────────────────────────────────────────────────
 FROM python:3.11-slim
 
-# Non-root user for security
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
 WORKDIR /app
 
-# Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy project source
-COPY --chown=appuser:appgroup . .
+# Copy everything including start.sh
+COPY . .
 
-USER appuser
-COPY start.sh .
+# Fix permissions BEFORE switching to non-root user
 RUN chmod +x start.sh
+
+# Now switch to non-root user
+USER appuser
+
+EXPOSE 8000
 CMD ["./start.sh"]
