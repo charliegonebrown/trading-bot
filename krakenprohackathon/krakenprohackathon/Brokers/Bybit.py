@@ -14,13 +14,13 @@ class BybitBroker:
         # Testnet 1-minute candles are stale/cached and will break all indicators.
         self.market_session = HTTP(
             testnet=False,
-            domain="bybit"  # bytick domain for Nigerian ISP connectivity
+            domain="bybit"  # bybit domain for Nigerian ISP connectivity
         )
         self.trade_session = HTTP(
             testnet=True,
             api_key=os.getenv("BYBIT_API_KEY"),
             api_secret=os.getenv("BYBIT_SECRET_KEY"),
-            domain="bytick"
+            domain="bybit"
         )
 
     def get_current_price(self, symbol: str) -> float:
@@ -103,7 +103,7 @@ class BybitBroker:
 
     async def get_last_price(self, symbol: str) -> float:
         """Async real-time price fetch via mainnet REST (no auth needed)"""
-        url = f"https://api.bytick.com/v5/market/tickers?category=linear&symbol={symbol}"
+        url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
         try:
             async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
                 response = await client.get(url)
