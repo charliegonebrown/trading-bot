@@ -39,8 +39,8 @@ async function fetchHistoricalKlines(symbol, timeframe, limit = 100) {
 
   // Crypto — Bybit via corsproxy
   const bybitInterval = INTERVAL_MAP[timeframe] || "1";
-  const targetUrl = `https://api.bytick.com/v5/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=${bybitInterval}&limit=${limit}`;
-  const proxyUrl  = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+  const API_BASE = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
+  const proxyUrl = `${API_BASE}/api/candles?symbol=${symbol.toUpperCase()}&interval=${bybitInterval}&limit=${limit}`;
   const res  = await fetch(proxyUrl);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
@@ -190,7 +190,7 @@ export default function LiveChart({ symbol: propSymbol }) {
     }
 
     // Crypto: Bybit WebSocket
-    const ws = new WebSocket("wss://stream.bytick.com/v5/public/linear");
+    const ws = new WebSocket("wss://stream.bybit.com/v5/public/linear");
     const bybitInterval = INTERVAL_MAP[timeframe] || "1";
 
     ws.onopen = () => {

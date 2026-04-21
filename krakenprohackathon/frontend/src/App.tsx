@@ -84,9 +84,8 @@ function PriceSidebar() {
       const results = {};
       await Promise.allSettled(symbols.map(async (s) => {
         try {
-          const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(`https://api.bytick.com/v5/market/tickers?category=linear&symbol=${s}`)}`);
-          const d = await res.json();
-          const item = d?.result?.list?.[0];
+          const res = await axios.get(`${API_BASE}/api/price`, { params: { symbol: s } });
+          const data = res.data;
           if (item) {
             results[s] = {
               price: parseFloat(item.lastPrice),

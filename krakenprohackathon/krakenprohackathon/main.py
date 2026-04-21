@@ -484,3 +484,21 @@ async def get_instruments():
     except Exception as e:
         logger.error(f"[Instruments] Error: {e}")
         return []# env fix Tue, Apr 21, 2026  7:33:29 PM
+@app.get("/api/candles")
+async def get_candles(
+    symbol:   str = Query(...),
+    interval: str = Query("1"),
+    limit:    int = Query(100),
+):
+    try:
+        broker  = BybitBroker()
+        response = broker.market_session.get_kline(
+            category="linear",
+            symbol=symbol,
+            interval=interval,
+            limit=limit
+        )
+        candles = response['result']['list'][::-1]
+        return [{"time": int(c[0])//1000, "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])} for c in candles]
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
