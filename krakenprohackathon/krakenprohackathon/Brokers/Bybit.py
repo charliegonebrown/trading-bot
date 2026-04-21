@@ -14,7 +14,7 @@ class BybitBroker:
         # Testnet 1-minute candles are stale/cached and will break all indicators.
         self.market_session = HTTP(
             testnet=False,
-            domain="bytick"  # bytick domain for Nigerian ISP connectivity
+            domain="bybit"  # bytick domain for Nigerian ISP connectivity
         )
         self.trade_session = HTTP(
             testnet=True,

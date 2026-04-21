@@ -445,7 +445,7 @@ async def analyse_stock(
 
 @app.get("/api/instruments")
 async def get_instruments():
-    url = "https://api.bytick.com/v5/market/tickers?category=linear"
+    url = "https://api.bybit.com/v5/market/tickers?category=linear"
     SYMBOLS_TO_TRACK = {
         "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT",
         "ADAUSDT","AVAXUSDT","DOTUSDT","POLUSDT","LINKUSDT","UNIUSDT",
