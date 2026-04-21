@@ -32,4 +32,4 @@ RUN chmod +x start.sh
 USER appuser
 
 EXPOSE 8000
-CMD ["./start.sh"]
+CMD ["python", "start.py"]
