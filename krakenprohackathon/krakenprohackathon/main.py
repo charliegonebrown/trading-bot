@@ -483,4 +483,4 @@ async def get_instruments():
         return filtered
     except Exception as e:
         logger.error(f"[Instruments] Error: {e}")
-        return []
+        return []# env fix Tue, Apr 21, 2026  7:33:29 PM
