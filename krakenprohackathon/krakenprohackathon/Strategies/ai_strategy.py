@@ -119,7 +119,7 @@ def _math_only_signal(triple_conf: Dict, mc_prob: float, interval: str = "60") -
     base_tp, base_sl = INTERVAL_TP_SL.get(interval, (2.5, 1.25))
 
     # Monte Carlo safety gate — if stats don't agree, don't trade
-    if action != "hold" and mc_prob < 45:
+    if action != "hold" and mc_prob < 40:
         return {
             "action":           "hold",
             "reason":           f"Triple Confirmation says {action.upper()} but Monte Carlo probability too low ({mc_prob:.1f}% < 45%). Waiting for better setup.",

@@ -14,7 +14,7 @@ class HybridTradingAgent:
         self.broker = broker
         self.market_type = market_type
         self.min_confidence     = 0.50
-        self.min_mc_probability = 45.0
+        self.min_mc_probability = 40.0
 
     async def analyze_and_decide(self, symbol: str) -> Dict:
         logger.info(f"Fetching price history for {symbol}...")
