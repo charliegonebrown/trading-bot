@@ -13,12 +13,16 @@ class HybridTradingAgent:
     def __init__(self, broker, market_type: MarketType):
         self.broker = broker
         self.market_type = market_type
-        self.min_confidence     = 0.50   # FIX: score 2/4 = 0.50, was 0.65 which secretly required score≥3
-        self.min_mc_probability = 45.0   # FIX: lowered from 60.0 to match the gate in ai_strategy (45%)
+        self.min_confidence     = 0.50
+        self.min_mc_probability = 45.0
 
     async def analyze_and_decide(self, symbol: str) -> Dict:
+        logger.info(f"Fetching price history for {symbol}...")
         prices = self.broker.get_price_history(symbol, interval="60")
+        logger.info(f"Got {len(prices) if prices else 0} candles for {symbol}")
+
         if not prices or len(prices) < 30:
+            logger.warning(f"Insufficient history for {symbol}: {len(prices) if prices else 0} candles")
             return {"action": "hold", "reason": "Insufficient history or Network Error"}
 
         math_signal    = get_triple_confirmation_signal(prices)
@@ -34,12 +38,7 @@ class HybridTradingAgent:
     def calculate_position_size(self, balance: float, price: float, risk_pct: float) -> float:
         return round(balance * (risk_pct / 100), 2)
 
-    # ─── TRADE MONITOR ────────────────────────────────────────────────────────
     def monitor_open_trades(self, db_session):
-        """
-        Called every 10 seconds. Fetches prices for all open symbols
-        in one batch then checks TP/SL — minimises API calls and lag.
-        """
         open_trades = db_session.query(Trade).filter(
             Trade.status == TradeStatus.OPEN
         ).all()
@@ -49,7 +48,6 @@ class HybridTradingAgent:
 
         portfolio = db_session.query(Portfolio).first()
 
-        # ── Batch: one price call per unique symbol ───────────────────────────
         symbols   = list(set(t.symbol for t in open_trades))
         price_map = {}
         for symbol in symbols:
@@ -123,7 +121,6 @@ class HybridTradingAgent:
                 db_session.rollback()
                 logger.error(f"[Monitor] Error TX-{trade.id}: {e}")
 
-    # ─── MAIN TRADING CYCLE ───────────────────────────────────────────────────
     async def run_cycle(self, symbols: List[str], db_session):
         settings  = db_session.query(BotSettings).first()
         portfolio = db_session.query(Portfolio).first()
