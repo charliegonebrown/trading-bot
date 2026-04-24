@@ -43,7 +43,6 @@ class AlpacaBroker:
         try:
             import alpaca_trade_api as tradeapi
 
-            # Map timeframe string to TimeFrame object
             TF_MAP = {
                 "1Min":  tradeapi.TimeFrame.Minute,
                 "5Min":  tradeapi.TimeFrameUnit.Minute,
@@ -53,12 +52,9 @@ class AlpacaBroker:
                 "1Day":  tradeapi.TimeFrame.Day,
             }
 
-            # Use start/end date range to get enough bars
-            # Alpaca v2 bars API needs explicit date range
-            end   = datetime.utcnow()
-            # Go back far enough to get 'limit' bars even with weekends/holidays
-            days_back = max(limit * 2, 60) if timeframe in ("1Hour","4Hour") else limit + 30
-            start = end - timedelta(days=days_back)
+            end       = datetime.utcnow()
+            days_back = max(limit * 2, 60) if timeframe in ("1Hour", "4Hour") else limit + 30
+            start     = end - timedelta(days=days_back)
 
             bars = self.api.get_bars(
                 symbol,
@@ -66,11 +62,10 @@ class AlpacaBroker:
                 start=start.strftime("%Y-%m-%d"),
                 end=end.strftime("%Y-%m-%d"),
                 limit=limit,
-                feed="iex"   # IEX feed works on free Alpaca tier
+                feed="iex"
             ).df
 
             if bars.empty:
-                # Retry without feed parameter
                 bars = self.api.get_bars(
                     symbol, timeframe,
                     start=start.strftime("%Y-%m-%d"),
@@ -85,6 +80,10 @@ class AlpacaBroker:
         except Exception as e:
             logger.error(f"Price history failed for {symbol} @ {timeframe}: {e}")
             return []
+
+    def get_current_price(self, symbol: str) -> float:
+        """Alias for get_latest_price — used by base_agent.py"""
+        return self.get_latest_price(symbol)
 
     def get_latest_price(self, symbol: str) -> float:
         self._check()
