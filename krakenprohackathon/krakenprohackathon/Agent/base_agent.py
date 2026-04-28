@@ -14,16 +14,21 @@ class HybridTradingAgent:
         self.broker = broker
         self.market_type = market_type
         self.min_confidence     = 0.50
-        self.min_mc_probability = 40.0
+        self.min_mc_probability = 30.0  # FIX: lowered from 40.0 — was unreachable in ranging/trending markets
 
     async def analyze_and_decide(self, symbol: str) -> Dict:
         logger.info(f"Fetching price history for {symbol}...")
-        prices = self.broker.get_price_history(symbol, interval="60")
+        try:
+            prices = self.broker.get_price_history(symbol, interval="60")
+        except Exception as e:
+            logger.error(f"Price fetch exception for {symbol}: {e}")
+            return {"action": "hold", "reason": f"Price fetch exception: {e}", "confidence": 0.0, "mc_probability": 0.0}
+
         logger.info(f"Got {len(prices) if prices else 0} candles for {symbol}")
 
         if not prices or len(prices) < 30:
             logger.warning(f"Insufficient history for {symbol}: {len(prices) if prices else 0} candles")
-            return {"action": "hold", "reason": "Insufficient history or Network Error"}
+            return {"action": "hold", "reason": "Insufficient history or Network Error", "confidence": 0.0, "mc_probability": 0.0}
 
         math_signal    = get_triple_confirmation_signal(prices)
         final_decision = await get_hybrid_ai_signal(
@@ -140,8 +145,25 @@ class HybridTradingAgent:
                 logger.info(f"--- Deep Analysis for {symbol} ---")
                 decision = await self.analyze_and_decide(symbol)
 
+                # FIX: log every decision — previously holds were silent, impossible to debug
+                logger.info(
+                    f"[Decision] {symbol}: action={decision['action']} | "
+                    f"conf={decision.get('confidence', 'N/A')} | "
+                    f"mc={decision.get('mc_probability', 'N/A')} | "
+                    f"reason={decision.get('reason', '')[:100]}"
+                )
+
                 if decision["action"] == "hold":
                     continue
+
+                # FIX: log sell signals — previously skipped silently with no trace in logs
+                if decision["action"] == "sell":
+                    logger.info(
+                        f"[SELL SIGNAL] {symbol} — not executed (long-only mode). "
+                        f"conf={decision.get('confidence')} mc={decision.get('mc_probability')}%"
+                    )
+                    continue
+
                 if decision["confidence"] < self.min_confidence:
                     logger.info(f"Skipping {symbol}: Confidence too low ({decision['confidence']})")
                     continue
@@ -189,6 +211,8 @@ class HybridTradingAgent:
                         portfolio.balance -= notional
                         db_session.commit()
                         logger.info(f"SUCCESS: Bought {symbol} for ${notional} (TP: {tp_val}%, SL: {sl_val}%)")
+                    else:
+                        logger.error(f"Order failed for {symbol}: {order_result.get('error')}")
 
             except Exception as e:
                 db_session.rollback()

@@ -26,7 +26,6 @@ class BybitBroker:
     def get_current_price(self, symbol: str) -> float:
         """Uses KuCoin public API — no geo-restrictions anywhere."""
         try:
-            # Convert BTCUSDT → BTC-USDT for KuCoin format
             base = symbol.upper().replace("USDT", "")
             kucoin_symbol = f"{base}-USDT"
             url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={kucoin_symbol}"
@@ -38,18 +37,21 @@ class BybitBroker:
         except Exception as e:
             logger.error(f"KuCoin price fetch failed for {symbol}: {e}")
             return 0.0
+
     def get_price_history(self, symbol: str, interval: str = "1", limit: int = 200):
         """Uses KuCoin for candle history — no geo-restrictions."""
         INTERVAL_MAP = {
-            "1":"1min","3":"3min","5":"5min","15":"15min","30":"30min",
-            "60":"1hour","120":"2hour","240":"4hour","360":"6hour",
-            "720":"8hour","D":"1day","W":"1week",
+            "1":   "1min",  "3":   "3min",  "5":   "5min",
+            "15":  "15min", "30":  "30min", "60":  "1hour",
+            "120": "2hour", "240": "4hour", "360": "6hour",
+            "720": "8hour", "D":   "1day",  "W":   "1week",
         }
         kc_interval = INTERVAL_MAP.get(interval, "1min")
         base      = symbol.upper().replace("USDT", "")
         kc_symbol = f"{base}-USDT"
+        response  = None
         try:
-            url = f"https://api.kucoin.com/api/v1/market/candles?type={kc_interval}&symbol={kc_symbol}"
+            url      = f"https://api.kucoin.com/api/v1/market/candles?type={kc_interval}&symbol={kc_symbol}"
             response = requests.get(url, timeout=10)
             data     = response.json()
             candles  = data["data"][::-1]  # newest first → reverse to chronological
@@ -62,7 +64,9 @@ class BybitBroker:
             logger.info(f"✅ KuCoin {symbol}: {len(prices)} candles, latest=${prices[-1]:,.2f}")
             return prices
         except Exception as e:
-            logger.error(f"KuCoin history failed for {symbol}: {e}")
+            # FIX: log raw response so KuCoin errors/rate-limits are visible in deploy logs
+            raw = response.text[:300] if response is not None else "no response"
+            logger.error(f"KuCoin history failed for {symbol}: {e} | raw={raw}")
             return []
 
     def place_bracket_order(
